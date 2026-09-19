@@ -16,6 +16,8 @@ export interface TripImage {
   exif?: ImageEXIF | null;
   s3Key: string;
   s3Url: string;
+  /** Small resized JPEG for grid display; falls back to `s3Url` if the backend hasn't generated one yet. */
+  thumbnailUrl: string;
   /** RFC 3339 */
   createdAt: string;
   /** RFC 3339 */
@@ -52,22 +54,100 @@ export interface RawTripImage {
   exif?: RawImageEXIF | null;
   s3Key?: string;
   s3Url?: string;
+  thumbnailUrl?: string;
   createdAt?: string;
   updatedAt?: string;
 }
 
-/** `{ "uploaded": RawTripImage[] }` — used by both upload and list endpoints. */
+/** `{ "uploaded": RawTripImage[] }` — used by the list endpoint. */
 export interface RawTripImageCollection {
   uploaded?: RawTripImage[] | null;
 }
 
-/** Result of a batch upload — files are sent one request at a time. */
-export interface TripImageUploadResult {
-  uploaded: TripImage[];
-  failed: Array<{ fileName: string; error: string }>;
+/**
+ * `clientId`/`s3Key` let the frontend correlate a failure back to the right
+ * file without relying on `fileName`, which two different files in the same
+ * batch could share.
+ */
+export interface FailedImageUpload {
+  fileName: string;
+  error: string;
+  clientId?: string;
+  s3Key?: string;
 }
 
-/** Client-side rules for what the backend can decode (Go stdlib image). */
-export const ACCEPTED_IMAGE_TYPES = ["image/jpeg", "image/png", "image/gif"] as const;
+/** Result of a batch upload. */
+export interface TripImageUploadResult {
+  uploaded: TripImage[];
+  failed: FailedImageUpload[];
+}
+
+/**
+ * Direct-to-S3 upload contract: the backend never sees file bytes. See
+ * `src/services/trip-image-upload.ts` for the full presign -> PUT -> complete flow.
+ */
+export interface PresignedImageUpload {
+  clientId: string;
+  fileName: string;
+  s3Key: string;
+  uploadUrl: string;
+  contentType: string;
+}
+
+export interface RawPresignImagesResponse {
+  uploads?: PresignedImageUpload[] | null;
+  failed?: FailedImageUpload[] | null;
+}
+
+export interface RawCompleteImagesResponse {
+  uploaded?: RawTripImage[] | null;
+  failed?: FailedImageUpload[] | null;
+}
+
+/**
+ * Client-side rules for what the backend can decode. HEIC/HEIF (the iPhone
+ * camera default) is converted to JPEG server-side on upload — see
+ * convertHEICToJPEG in trip_image_service.go.
+ */
+export const ACCEPTED_IMAGE_TYPES = [
+  "image/jpeg",
+  "image/png",
+  "image/gif",
+  "image/heic",
+  "image/heif",
+] as const;
 export const ACCEPTED_IMAGE_ACCEPT_ATTR = ACCEPTED_IMAGE_TYPES.join(",");
 export const MAX_IMAGE_BYTES = 15 * 1024 * 1024; // 15 MB per file
+
+/** Pure mapping, safe to call from both server-only code and the browser. */
+export function normalizeTripImage(raw: RawTripImage): TripImage {
+  return {
+    id: String(raw.id ?? ""),
+    tripId: String(raw.tripId ?? ""),
+    userId: String(raw.userId ?? ""),
+    fileName: raw.fileName ?? "",
+    contentType: raw.contentType ?? "",
+    fileSizeBytes: Number(raw.fileSizeBytes ?? 0),
+    width: Number(raw.width ?? 0),
+    height: Number(raw.height ?? 0),
+    dimensionName: raw.dimensionName ?? "",
+    exif: raw.exif
+      ? {
+          capturedAt: raw.exif.captured_at,
+          timezone: raw.exif.timezone,
+          cameraMake: raw.exif.camera_make,
+          cameraModel: raw.exif.camera_model,
+          lensModel: raw.exif.lens_model,
+        }
+      : null,
+    s3Key: raw.s3Key ?? "",
+    s3Url: raw.s3Url ?? "",
+    thumbnailUrl: raw.thumbnailUrl || raw.s3Url || "",
+    createdAt: raw.createdAt ?? "",
+    updatedAt: raw.updatedAt ?? "",
+  };
+}
+
+export function normalizeTripImageCollection(raw: RawTripImage[] | null | undefined): TripImage[] {
+  return Array.isArray(raw) ? raw.map(normalizeTripImage) : [];
+}

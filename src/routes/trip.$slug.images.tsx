@@ -8,11 +8,9 @@ import { ConfirmDialog } from "@/components/voyaloom/ConfirmDialog";
 import { requireAuth } from "@/lib/auth/guards";
 import { ACCEPTED_IMAGE_TYPES, MAX_IMAGE_BYTES, type TripImage } from "@/interface/trip-image";
 import { seo } from "@/lib/seo/seo";
-import {
-  deleteTripImageFn,
-  listTripImagesFn,
-  uploadTripImagesFn,
-} from "@/services/trip-image.functions";
+import { getAlbumFn } from "@/services/album.functions";
+import { deleteTripImageFn, listTripImagesFn } from "@/services/trip-image.functions";
+import { uploadTripImages } from "@/services/trip-image-upload";
 
 export const Route = createFileRoute("/trip/$slug/images")({
   beforeLoad: ({ context, location }) => requireAuth(context, location.pathname),
@@ -33,8 +31,12 @@ function TripImages() {
   const [error, setError] = useState<string | null>(null);
   const [selected, setSelected] = useState<File[]>([]);
   const [uploading, setUploading] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState<
+    Record<string, { fileName: string; loaded: number; total: number }>
+  >({});
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [imagePendingDelete, setImagePendingDelete] = useState<TripImage | null>(null);
+  const [hasAlbum, setHasAlbum] = useState<boolean | null>(null);
 
   useEffect(() => {
     listTripImagesFn({ data: { tripId } })
@@ -42,6 +44,9 @@ function TripImages() {
       .catch((reason) =>
         setError(reason instanceof Error ? reason.message : "Could not load images."),
       );
+    getAlbumFn({ data: { tripId } })
+      .then(() => setHasAlbum(true))
+      .catch(() => setHasAlbum(false));
   }, [tripId]);
 
   function pickFiles(list: FileList) {
@@ -52,27 +57,40 @@ function TripImages() {
         file.size <= MAX_IMAGE_BYTES,
     );
     if (valid.length !== list.length)
-      toast.warning("Some files were skipped. Use JPEG, PNG or GIF up to 15 MB.");
+      toast.warning("Some files were skipped. Use JPEG, PNG, GIF or HEIC up to 15 MB.");
     setSelected((current) => [...current, ...valid]);
   }
 
   async function addPhotos() {
     if (selected.length === 0) return;
-    const form = new FormData();
-    form.append("tripId", tripId);
-    selected.forEach((file) => form.append("images", file, file.name));
+    const entries = selected.map((file, index) => ({
+      clientId: `${file.name}-${index}-${file.size}`,
+      file,
+    }));
     setUploading(true);
+    setUploadProgress(
+      Object.fromEntries(
+        entries.map(({ clientId, file }) => [clientId, { fileName: file.name, loaded: 0, total: file.size }]),
+      ),
+    );
     try {
-      const result = await uploadTripImagesFn({ data: form });
-      setImages((current) => [...(current ?? []), ...result.uploaded]);
+      const { uploaded, failed } = await uploadTripImages(tripId, entries, {
+        onProgress: ({ clientId, fileName, loaded, total }) =>
+          setUploadProgress((current) => ({ ...current, [clientId]: { fileName, loaded, total } })),
+      });
+      setImages((current) => [...(current ?? []), ...uploaded.map((entry) => entry.image)]);
       setSelected([]);
-      toast.success(
-        `${result.uploaded.length} photo${result.uploaded.length === 1 ? "" : "s"} added.`,
-      );
+      if (uploaded.length > 0) {
+        toast.success(`${uploaded.length} photo${uploaded.length === 1 ? "" : "s"} added.`);
+      }
+      if (failed.length > 0) {
+        toast.error(failed[0].error || "Some photos could not be added.");
+      }
     } catch (reason) {
       toast.error(reason instanceof Error ? reason.message : "Could not add photos.");
     } finally {
       setUploading(false);
+      setUploadProgress({});
     }
   }
 
@@ -113,13 +131,34 @@ function TripImages() {
             </p>
           </div>
           <div className="flex flex-wrap gap-3">
-            <Link
-              to="/album/$slug"
-              params={{ slug: tripId }}
-              className="border border-white/20 px-5 py-3 text-[10px] uppercase tracking-luxury hover:border-gold hover:text-gold"
-            >
-              View album
-            </Link>
+            {hasAlbum && (
+              <Link
+                to="/album/$slug"
+                params={{ slug: tripId }}
+                className="border border-white/20 px-5 py-3 text-[10px] uppercase tracking-luxury hover:border-gold hover:text-gold"
+              >
+                View album
+              </Link>
+            )}
+            {hasAlbum !== null &&
+              (hasAlbum ? (
+                <Link
+                  to="/album/$slug"
+                  params={{ slug: tripId }}
+                  search={{ regenerate: "1" }}
+                  className="bg-gold px-5 py-3 text-[10px] font-semibold uppercase tracking-luxury text-midnight transition-colors hover:bg-sand"
+                >
+                  Regenerate album
+                </Link>
+              ) : (
+                <Link
+                  to="/trip/$slug/processing"
+                  params={{ slug: tripId }}
+                  className="bg-gold px-5 py-3 text-[10px] font-semibold uppercase tracking-luxury text-midnight transition-colors hover:bg-sand"
+                >
+                  Generate album
+                </Link>
+              ))}
             <Link
               to="/dashboard"
               className="border border-white/20 px-5 py-3 text-[10px] uppercase tracking-luxury hover:border-gold hover:text-gold"
@@ -131,7 +170,7 @@ function TripImages() {
 
         <section className="mt-12">
           <UploadDropzone onFiles={pickFiles} />
-          {selected.length > 0 && (
+          {selected.length > 0 && !uploading && (
             <div className="mt-6 flex items-center justify-between border border-gold/20 bg-gold/5 px-5 py-4">
               <span className="text-[10px] uppercase tracking-luxury text-gold">
                 {selected.length} ready to add
@@ -139,12 +178,41 @@ function TripImages() {
               <button
                 type="button"
                 onClick={() => void addPhotos()}
-                disabled={uploading}
-                className="inline-flex items-center gap-2 bg-gold px-5 py-3 text-[10px] font-semibold uppercase tracking-luxury text-midnight disabled:opacity-60"
+                className="inline-flex items-center gap-2 bg-gold px-5 py-3 text-[10px] font-semibold uppercase tracking-luxury text-midnight"
               >
-                {uploading && <Loader2 className="size-3 animate-spin" />}
                 Add photos
               </button>
+            </div>
+          )}
+          {uploading && (
+            <div className="mt-6 space-y-4 border border-gold/20 bg-gold/5 px-5 py-4">
+              <span className="flex items-center gap-2 text-[10px] uppercase tracking-luxury text-gold">
+                <Loader2 className="size-3 animate-spin" />
+                Uploading {Object.keys(uploadProgress).length} photo
+                {Object.keys(uploadProgress).length === 1 ? "" : "s"}
+              </span>
+              <div className="space-y-3">
+                {Object.entries(uploadProgress).map(([clientId, progress]) => {
+                  const pct =
+                    progress.total > 0
+                      ? Math.min(100, Math.round((progress.loaded / progress.total) * 100))
+                      : 0;
+                  return (
+                    <div key={clientId}>
+                      <div className="flex items-center justify-between gap-4 text-[10px] text-sand/60">
+                        <span className="truncate">{progress.fileName}</span>
+                        <span className="shrink-0 text-sand/40">{pct}%</span>
+                      </div>
+                      <div className="mt-1.5 h-1 w-full overflow-hidden rounded-full bg-white/10">
+                        <div
+                          className="h-full rounded-full bg-gold transition-[width] duration-200"
+                          style={{ width: `${pct}%` }}
+                        />
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
             </div>
           )}
         </section>
@@ -165,10 +233,9 @@ function TripImages() {
                 key={image.id}
                 className="group relative aspect-square overflow-hidden bg-charcoal"
               >
-                <img
-                  src={image.s3Url}
+                <GalleryImage
+                  src={image.thumbnailUrl}
                   alt={image.fileName || "Trip photograph"}
-                  className="h-full w-full object-cover transition-transform duration-700 group-hover:scale-105"
                 />
                 <button
                   type="button"
@@ -192,5 +259,30 @@ function TripImages() {
         )}
       </main>
     </div>
+  );
+}
+
+/**
+ * A shimmering placeholder sits behind the `<img>` until it decodes, then
+ * fades out — so a grid of photos streaming in over the network reads as
+ * progressive loading rather than a blank tile popping in late.
+ */
+function GalleryImage({ src, alt }: { src: string; alt: string }) {
+  const [loaded, setLoaded] = useState(false);
+
+  return (
+    <>
+      {!loaded && <div className="absolute inset-0 animate-pulse bg-white/5" />}
+      <img
+        src={src}
+        alt={alt}
+        loading="lazy"
+        decoding="async"
+        onLoad={() => setLoaded(true)}
+        className={`h-full w-full object-cover transition-[opacity,transform] duration-700 group-hover:scale-105 ${
+          loaded ? "opacity-100" : "opacity-0"
+        }`}
+      />
+    </>
   );
 }

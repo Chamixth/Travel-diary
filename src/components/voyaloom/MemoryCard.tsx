@@ -13,7 +13,8 @@ interface MemoryCardProps {
   momentLabel?: string;
   onDelete?: () => void;
   deleting?: boolean;
-  actions?: ReactNode;
+  /** CTA revealed over the image on hover (always visible on touch devices, where hover doesn't exist). */
+  hoverAction?: ReactNode;
   navigateOnCard?: boolean;
 }
 
@@ -27,7 +28,7 @@ export function MemoryCard({
   momentLabel = "moments",
   onDelete,
   deleting = false,
-  actions,
+  hoverAction,
   navigateOnCard = true,
 }: MemoryCardProps) {
   const card = (
@@ -71,6 +72,11 @@ export function MemoryCard({
       className={`group relative overflow-hidden rounded-sm ${navigateOnCard ? "cursor-pointer" : "cursor-default"}`}
     >
       {navigateOnCard && to ? <Link to={to}>{card}</Link> : card}
+      {hoverAction && (
+        <div className="max-h-16 overflow-hidden opacity-100 transition-all duration-500 ease-out md:max-h-0 md:opacity-0 md:group-hover:max-h-16 md:group-hover:opacity-100">
+          {hoverAction}
+        </div>
+      )}
       {onDelete && (
         <button
           type="button"
@@ -86,7 +92,6 @@ export function MemoryCard({
           )}
         </button>
       )}
-      {actions && <div className="grid grid-cols-3 gap-px bg-white/10">{actions}</div>}
     </motion.div>
   );
 }

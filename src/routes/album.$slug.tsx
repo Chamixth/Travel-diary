@@ -1,5 +1,6 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
+import { z } from "zod";
 import { AlbumGenerationLoader } from "@/components/album/AlbumGenerationLoader";
 import { toImageMap } from "@/components/album/createAlbumPlan";
 import { LuxuryNavbar } from "@/components/voyaloom/LuxuryNavbar";
@@ -11,6 +12,7 @@ import { AlbumFilm } from "@/components/album/AlbumFilm";
 
 export const Route = createFileRoute("/album/$slug")({
   beforeLoad: ({ context, location }) => requireAuth(context, location.pathname),
+  validateSearch: z.object({ regenerate: z.string().optional().catch(undefined) }),
   head: () =>
     seo({
       title: "Your travel album",
@@ -22,6 +24,8 @@ export const Route = createFileRoute("/album/$slug")({
 
 function Album() {
   const { slug: tripId } = Route.useParams();
+  const { regenerate } = Route.useSearch();
+  const shouldRegenerate = regenerate === "1";
   const [album, setAlbum] = useState<{
     plan: import("@/interface/album").AlbumPlan;
     images: Record<string, string>;
@@ -31,35 +35,7 @@ function Album() {
   const [generating, setGenerating] = useState(false);
   const [generationError, setGenerationError] = useState<string | null>(null);
 
-  useEffect(() => {
-    let cancelled = false;
-    console.info("[VoyaLoom][Album] loading album", { tripId });
-
-    Promise.all([getAlbumFn({ data: { tripId } }), listTripImagesFn({ data: { tripId } })])
-      .then(([plan, images]) => {
-        if (cancelled) return;
-        console.info("[VoyaLoom][Album] loaded album", {
-          tripId,
-          chapters: plan.chapters.length,
-          imageCount: images.length,
-        });
-        setAlbum({
-          plan,
-          images: toImageMap(images),
-          sourceImages: images,
-        });
-      })
-      .catch((reason) => {
-        console.error("[VoyaLoom][Album] failed to load album", { tripId, reason });
-        if (!cancelled) setError(true);
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [tripId]);
-
-  async function handleGenerate() {
+  const handleGenerate = useCallback(async () => {
     console.info("[VoyaLoom][Album] generate clicked", { tripId });
     setGenerating(true);
     setGenerationError(null);
@@ -88,7 +64,43 @@ function Album() {
     } finally {
       setGenerating(false);
     }
-  }
+  }, [tripId]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    if (shouldRegenerate) {
+      console.info("[VoyaLoom][Album] regenerate requested, skipping existing album", { tripId });
+      void handleGenerate();
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    console.info("[VoyaLoom][Album] loading album", { tripId });
+    Promise.all([getAlbumFn({ data: { tripId } }), listTripImagesFn({ data: { tripId } })])
+      .then(([plan, images]) => {
+        if (cancelled) return;
+        console.info("[VoyaLoom][Album] loaded album", {
+          tripId,
+          chapters: plan.chapters.length,
+          imageCount: images.length,
+        });
+        setAlbum({
+          plan,
+          images: toImageMap(images),
+          sourceImages: images,
+        });
+      })
+      .catch((reason) => {
+        console.error("[VoyaLoom][Album] failed to load album", { tripId, reason });
+        if (!cancelled) setError(true);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [tripId, shouldRegenerate, handleGenerate]);
 
   if (error) {
     return (
@@ -125,8 +137,21 @@ function Album() {
   if (!album) {
     return (
       <AlbumShell>
+        {generating && <AlbumGenerationLoader />}
         <main className="flex min-h-[70vh] items-center justify-center px-6 pt-32">
-          <p className="text-[10px] uppercase tracking-luxury text-sand/50">Opening your album</p>
+          {generationError ? (
+            <div className="text-center">
+              <p className="text-sm text-red-300">{generationError}</p>
+              <Link
+                to="/dashboard"
+                className="mt-6 inline-flex border border-white/20 px-6 py-3 text-[10px] uppercase tracking-luxury hover:border-gold hover:text-gold"
+              >
+                Back to dashboard
+              </Link>
+            </div>
+          ) : !generating ? (
+            <p className="text-[10px] uppercase tracking-luxury text-sand/50">Opening your album</p>
+          ) : null}
         </main>
       </AlbumShell>
     );
@@ -140,6 +165,16 @@ function Album() {
           {generationError}
         </p>
       )}
+      <button
+        type="button"
+        data-testid="regenerate-album-button"
+        onClick={() => void handleGenerate()}
+        disabled={generating}
+        aria-busy={generating}
+        className="glass-strong fixed bottom-6 right-6 z-40 inline-flex items-center gap-2 rounded-full border border-gold/40 px-5 py-3 text-[9px] uppercase tracking-luxury text-gold transition-colors hover:bg-gold hover:text-midnight disabled:cursor-wait disabled:opacity-60"
+      >
+        Regenerate album
+      </button>
       <AlbumFilm images={album.sourceImages} plan={album.plan} />
     </AlbumShell>
   );

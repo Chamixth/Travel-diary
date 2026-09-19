@@ -38,7 +38,7 @@ const STEPS = [
   {
     n: "02",
     title: "Upload your travel photos",
-    body: "Add the photos you took — landscapes, streets, food, people, moments. VoyaLoom accepts JPEG, PNG, and GIF images. You don't need to sort, rename, or pre-select anything.",
+    body: "Add the photos you took — landscapes, streets, food, people, moments. VoyaLoom accepts JPEG, PNG, GIF, and HEIC images (including straight from an iPhone). You don't need to sort, rename, or pre-select anything.",
   },
   {
     n: "03",

@@ -1,7 +1,6 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { motion } from "framer-motion";
 import { useEffect, useRef, useState } from "react";
-import { useNavigate } from "@tanstack/react-router";
 import { X, ImagePlus, Loader2 } from "lucide-react";
 import { z } from "zod";
 import { toast } from "sonner";
@@ -10,7 +9,7 @@ import { CinematicFooter } from "@/components/voyaloom/CinematicFooter";
 import { UploadDropzone } from "@/components/voyaloom/UploadDropzone";
 import { requireAuth } from "@/lib/auth/guards";
 import { ACCEPTED_IMAGE_TYPES, MAX_IMAGE_BYTES } from "@/interface/trip-image";
-import { uploadTripImagesFn } from "@/services/trip-image.functions";
+import { uploadTripImages } from "@/services/trip-image-upload";
 import { seo } from "@/lib/seo/seo";
 
 export const Route = createFileRoute("/upload")({
@@ -32,15 +31,16 @@ interface Picked {
   url: string;
 }
 
-type UploadStatus = "queued" | "uploading" | "uploaded" | "failed";
+type UploadStatus = "queued" | "uploading" | "processing" | "uploaded" | "failed";
 
 interface UploadItem extends Picked {
   status: UploadStatus;
   error?: string;
+  /** 0-100. Real byte-level progress from the direct-to-S3 PUT. */
+  percent?: number;
 }
 
 function Upload() {
-  const navigate = useNavigate();
   const { trip: tripId } = Route.useSearch();
   const [stage, setStage] = useState<"upload" | "processing">("upload");
   const [picked, setPicked] = useState<Picked[]>([]);
@@ -76,7 +76,7 @@ function Upload() {
 
     if (skipped > 0) {
       toast.warning(
-        `${skipped} file${skipped > 1 ? "s were" : " was"} skipped (JPEG, PNG or GIF up to 15 MB).`,
+        `${skipped} file${skipped > 1 ? "s were" : " was"} skipped (JPEG, PNG, GIF or HEIC up to 15 MB).`,
       );
     }
     if (valid.length > 0) setPicked((prev) => [...prev, ...valid]);
@@ -104,58 +104,52 @@ function Upload() {
     const items = picked.map((item) => ({ ...item, status: "queued" as const }));
     setUploads(items);
     setStage("processing");
-    await runUploadQueue(items, items);
+    await runUploadQueue(items);
   }
 
-  async function runUploadQueue(target: UploadItem[], allItems: UploadItem[]) {
-    let cursor = 0;
-    const results = new Map<string, { ok: boolean; error?: string }>();
+  async function runUploadQueue(target: UploadItem[]) {
+    setUploads((current) =>
+      current.map((entry) =>
+        target.some((item) => item.url === entry.url)
+          ? { ...entry, status: "uploading", error: undefined, percent: 0 }
+          : entry,
+      ),
+    );
 
-    async function worker() {
-      while (cursor < target.length) {
-        const item = target[cursor++];
-        setUploads((current) =>
-          current.map((entry) =>
-            entry.url === item.url ? { ...entry, status: "uploading", error: undefined } : entry,
-          ),
-        );
-        const form = new FormData();
-        form.append("tripId", tripId!);
-        form.append("images", item.file, item.file.name);
-
-        try {
-          await uploadTripImagesFn({ data: form });
-          results.set(item.url, { ok: true });
+    const { uploaded, failed } = await uploadTripImages(
+      tripId!,
+      target.map((item) => ({ clientId: item.url, file: item.file })),
+      {
+        onProgress: ({ clientId, loaded, total }) => {
+          const percent = total > 0 ? Math.round((loaded / total) * 100) : 0;
           setUploads((current) =>
             current.map((entry) =>
-              entry.url === item.url ? { ...entry, status: "uploaded" } : entry,
+              entry.url === clientId
+                ? { ...entry, percent, status: percent >= 100 ? "processing" : entry.status }
+                : entry,
             ),
           );
-        } catch (reason) {
-          const message = reason instanceof Error ? reason.message : "Upload failed.";
-          results.set(item.url, { ok: false, error: message });
-          setUploads((current) =>
-            current.map((entry) =>
-              entry.url === item.url ? { ...entry, status: "failed", error: message } : entry,
-            ),
-          );
+        },
+      },
+    );
+
+    const succeededIds = new Set(uploaded.map((entry) => entry.clientId));
+    const failedById = new Map(failed.map((entry) => [entry.clientId, entry.error]));
+    setUploads((current) =>
+      current.map((entry) => {
+        if (succeededIds.has(entry.url)) return { ...entry, status: "uploaded", percent: 100 };
+        if (failedById.has(entry.url)) {
+          return { ...entry, status: "failed", error: failedById.get(entry.url) };
         }
-      }
-    }
+        return entry;
+      }),
+    );
 
-    await Promise.all(Array.from({ length: Math.min(2, target.length) }, () => worker()));
-
-    const failed = allItems.filter((item) => {
-      const result = results.get(item.url);
-      return result ? !result.ok : item.status === "failed";
-    });
-    const successful = allItems.length - failed.length;
     if (failed.length === 0) {
-      toast.success(`${successful} memor${successful === 1 ? "y" : "ies"} uploaded.`);
-      await navigate({ to: "/trip/$slug/processing", params: { slug: tripId! } });
+      toast.success(`${uploaded.length} memor${uploaded.length === 1 ? "y" : "ies"} uploaded.`);
     } else {
       toast.warning(
-        `${failed.length} upload${failed.length === 1 ? "" : "s"} failed. You can retry them.`,
+        `${failed.length} upload${failed.length === 1 ? "" : "s"} failed. You can retry ${failed.length === 1 ? "it" : "them"}.`,
       );
     }
   }
@@ -163,13 +157,7 @@ function Upload() {
   async function retryFailed() {
     const failed = uploads.filter((item) => item.status === "failed");
     if (failed.length === 0) return;
-    const reset = failed.map((item) => ({ ...item, status: "queued" as const, error: undefined }));
-    setUploads((current) =>
-      current.map((item) =>
-        item.status === "failed" ? { ...item, status: "queued", error: undefined } : item,
-      ),
-    );
-    await runUploadQueue(reset, uploads);
+    await runUploadQueue(failed);
   }
 
   return (
@@ -270,7 +258,9 @@ function Upload() {
           </>
         )}
 
-        {stage === "processing" && <UploadProgressPanel uploads={uploads} onRetry={retryFailed} />}
+        {stage === "processing" && (
+          <UploadProgressPanel uploads={uploads} tripId={tripId!} onRetry={retryFailed} />
+        )}
       </section>
 
       <CinematicFooter />
@@ -278,10 +268,24 @@ function Upload() {
   );
 }
 
-function UploadProgressPanel({ uploads, onRetry }: { uploads: UploadItem[]; onRetry: () => void }) {
+function UploadProgressPanel({
+  uploads,
+  tripId,
+  onRetry,
+}: {
+  uploads: UploadItem[];
+  tripId: string;
+  onRetry: () => void;
+}) {
   const uploaded = uploads.filter((item) => item.status === "uploaded").length;
   const failed = uploads.filter((item) => item.status === "failed").length;
   const complete = uploaded + failed;
+  // Counts a file the moment its own PUT to S3 finishes (not just once the
+  // whole batch's completion request comes back) so this climbs steadily
+  // per-file instead of sitting at 0 until every file lands at once.
+  const landed = uploads.filter((item) => item.status !== "queued" && item.status !== "uploading")
+    .length;
+  const isDone = complete === uploads.length;
 
   return (
     <div className="py-12 sm:py-20">
@@ -292,53 +296,74 @@ function UploadProgressPanel({ uploads, onRetry }: { uploads: UploadItem[]; onRe
             <h2 className="mt-3 font-serif text-3xl sm:text-4xl">Your memories are arriving.</h2>
           </div>
           <p className="shrink-0 font-serif text-2xl text-gold">
-            {uploaded} <span className="text-sand/35">of {uploads.length}</span>
+            {landed} <span className="text-sand/35">of {uploads.length}</span>
           </p>
         </div>
         <div className="mb-8 h-1 overflow-hidden bg-white/10">
           <div
             className="h-full bg-gold transition-[width] duration-500"
-            style={{ width: `${uploads.length ? (complete / uploads.length) * 100 : 0}%` }}
+            style={{ width: `${uploads.length ? (landed / uploads.length) * 100 : 0}%` }}
           />
         </div>
-        <div className="space-y-2">
-          {uploads.map((item) => (
-            <div key={item.url} className="border border-white/10 bg-charcoal/40 px-4 py-3">
-              <div className="flex items-center gap-3">
-                <img src={item.url} alt="" className="size-11 shrink-0 object-cover" />
-                <div className="min-w-0 flex-1">
-                  <p className="truncate text-xs text-sand/80">{item.file.name}</p>
-                  <div className="mt-2 h-px bg-white/10">
-                    <div
-                      className={`h-full transition-[width] duration-500 ${item.status === "failed" ? "bg-ember" : "bg-gold"} ${item.status === "uploading" ? "w-2/3 animate-pulse" : item.status === "queued" ? "w-0" : "w-full"}`}
-                    />
+        <div className="max-h-[min(58vh,560px)] overflow-y-auto overscroll-contain border border-white/10 bg-charcoal/20 p-2 pr-3 [scrollbar-color:rgba(216,177,104,0.55)_rgba(255,255,255,0.06)] [scrollbar-width:thin]">
+          <div className="space-y-2">
+            {uploads.map((item) => (
+              <div key={item.url} className="border border-white/10 bg-charcoal/40 px-4 py-3">
+                <div className="flex items-center gap-3">
+                  <img src={item.url} alt="" className="size-11 shrink-0 object-cover" />
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate text-xs text-sand/80">{item.file.name}</p>
+                    <div className="mt-2 h-px bg-white/10">
+                      <div
+                        className={`h-full transition-[width] duration-300 ${item.status === "failed" ? "bg-ember" : "bg-gold"}`}
+                        style={{
+                          width:
+                            item.status === "uploaded" || item.status === "processing"
+                              ? "100%"
+                              : item.status === "queued"
+                                ? "0%"
+                                : `${item.percent ?? 0}%`,
+                        }}
+                      />
+                    </div>
                   </div>
+                  <span className="shrink-0 text-[9px] uppercase tracking-luxury text-sand/45">
+                    {item.status === "uploading"
+                      ? `Uploading ${item.percent ?? 0}%`
+                      : item.status === "processing"
+                        ? "Processing"
+                        : item.status === "uploaded"
+                          ? "Uploaded"
+                          : item.status === "failed"
+                            ? "Failed"
+                            : "Queued"}
+                  </span>
                 </div>
-                <span className="shrink-0 text-[9px] uppercase tracking-luxury text-sand/45">
-                  {item.status === "uploading"
-                    ? "Uploading"
-                    : item.status === "uploaded"
-                      ? "Uploaded"
-                      : item.status === "failed"
-                        ? "Failed"
-                        : "Queued"}
-                </span>
+                {item.error && <p className="mt-2 pl-14 text-[10px] text-ember">{item.error}</p>}
               </div>
-              {item.error && <p className="mt-2 pl-14 text-[10px] text-ember">{item.error}</p>}
-            </div>
-          ))}
+            ))}
+          </div>
         </div>
+        {isDone && uploaded > 0 && (
+          <Link
+            to="/trip/$slug/images"
+            params={{ slug: tripId }}
+            className="mt-8 inline-flex w-full items-center justify-center gap-2 bg-gold px-6 py-4 text-[10px] font-semibold uppercase tracking-luxury text-midnight transition-colors hover:bg-sand"
+          >
+            View your photos
+          </Link>
+        )}
         {failed > 0 && (
           <button
             type="button"
             onClick={() => void onRetry()}
-            className="mt-8 inline-flex w-full items-center justify-center gap-2 border border-gold/50 px-6 py-4 text-[10px] uppercase tracking-luxury text-gold transition-colors hover:bg-gold hover:text-midnight"
+            className="mt-4 inline-flex w-full items-center justify-center gap-2 border border-gold/50 px-6 py-4 text-[10px] uppercase tracking-luxury text-gold transition-colors hover:bg-gold hover:text-midnight"
           >
             <Loader2 className="size-3" />
             Retry failed uploads
           </button>
         )}
-        {failed === 0 && uploaded < uploads.length && (
+        {!isDone && (
           <p className="mt-8 flex items-center justify-center gap-2 text-center text-[10px] uppercase tracking-luxury text-sand/40">
             <Loader2 className="size-3 animate-spin" />
             Uploading securely. You can keep this screen open.

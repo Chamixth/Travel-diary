@@ -47,7 +47,7 @@ function Auth0Callback() {
         const accessToken = await getAccessTokenSilently({
           authorizationParams: {
             audience: import.meta.env.VITE_AUTH0_AUDIENCE,
-            scope: "openid profile email",
+            scope: "openid profile email offline_access",
           },
         });
         logAuth0TokenMetadata(accessToken);
@@ -99,7 +99,7 @@ function logAuth0TokenMetadata(token: string): void {
     };
 
     console.info("[Auth0] access token metadata", {
-      audience: decoded.aud,
+      audience: Array.isArray(decoded.aud) ? decoded.aud.join(", ") : decoded.aud,
       issuer: decoded.iss,
       expiresAt: decoded.exp ? new Date(decoded.exp * 1000).toISOString() : null,
       tokenLength: token.length,

@@ -54,7 +54,7 @@ export const FAQ_ITEMS: FaqItem[] = [
   {
     question: "What kind of photos work best?",
     answer:
-      "Regular travel and vacation photos work well — landscapes, streets, food, people, and moments from your trip. VoyaLoom accepts JPEG, PNG, and GIF images.",
+      "Regular travel and vacation photos work well — landscapes, streets, food, people, and moments from your trip. VoyaLoom accepts JPEG, PNG, GIF, and HEIC images (including straight from an iPhone).",
   },
   {
     question: "Can I use VoyaLoom for vacation photos?",

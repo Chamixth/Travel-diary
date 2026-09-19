@@ -59,11 +59,22 @@ export function AlbumFilm({ images, plan }: { images: TripImage[]; plan: AlbumPl
         }));
         const chapterPhotos = blocks.flatMap(({ photos }) => photos);
         const uniquePhotos = [...new Map(chapterPhotos.map((photo) => [photo.id, photo])).values()];
+        const chapterCoverId = uniquePhotos[0]?.id;
+        const displayedIds = new Set(chapterCoverId ? [chapterCoverId] : []);
+        const visibleBlocks = blocks.map(({ block, photos }) => ({
+          block,
+          // The first chapter photo is already displayed as the chapter hero.
+          photos: photos.filter((photo) => {
+            if (displayedIds.has(photo.id)) return false;
+            displayedIds.add(photo.id);
+            return true;
+          }),
+        }));
         return {
           key: chapter.id,
           date: uniquePhotos[0]?.capturedAt ?? null,
           photos: uniquePhotos,
-          blocks,
+          blocks: visibleBlocks,
           eyebrow: chapter.eyebrow,
           title: chapter.title,
           quote: chapter.quote,

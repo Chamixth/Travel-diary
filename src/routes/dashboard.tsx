@@ -1,6 +1,6 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { motion } from "framer-motion";
-import { Loader2, Plus } from "lucide-react";
+import { ArrowRight, Loader2, Plus } from "lucide-react";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { LuxuryNavbar } from "@/components/voyaloom/LuxuryNavbar";
@@ -223,33 +223,16 @@ function DashboardTripCard({
       mood={trip.cinematicMood || undefined}
       onDelete={onDelete}
       deleting={deleting}
-      actions={
-        <>
-          <Link
-            to="/trip/$slug/processing"
-            params={{ slug: trip.id }}
-            className="bg-midnight/95 px-1 py-3 text-center text-[8px] uppercase leading-tight tracking-[0.12em] text-gold transition-colors hover:bg-gold hover:text-midnight sm:px-2 sm:text-[9px] sm:tracking-luxury"
-          >
-            Generate album
-          </Link>
-          <Link
-            to="/album/$slug"
-            params={{ slug: trip.id }}
-            className="bg-midnight/95 px-1 py-3 text-center text-[8px] uppercase leading-tight tracking-[0.12em] text-sand/70 transition-colors hover:bg-sand hover:text-midnight sm:px-2 sm:text-[9px] sm:tracking-luxury"
-          >
-            View album
-          </Link>
-          <a
-            href={`/trip/${encodeURIComponent(trip.id)}/images`}
-            onClick={() =>
-              console.info("[VoyaLoom][Dashboard] view images clicked", { tripId: trip.id })
-            }
-            data-testid={`view-images-${trip.id}`}
-            className="bg-midnight/95 px-1 py-3 text-center text-[8px] uppercase leading-tight tracking-[0.12em] text-sand/70 transition-colors hover:bg-sand hover:text-midnight sm:px-2 sm:text-[9px] sm:tracking-luxury"
-          >
-            View images
-          </a>
-        </>
+      hoverAction={
+        <Link
+          to="/trip/$slug/images"
+          params={{ slug: trip.id }}
+          data-testid={`view-journey-${trip.id}`}
+          className="flex w-full items-center justify-center gap-2 bg-gold px-5 py-4 text-[10px] font-semibold uppercase tracking-luxury text-midnight transition-colors hover:bg-gold-glow"
+        >
+          View journey
+          <ArrowRight className="size-3.5" />
+        </Link>
       }
     />
   );
