@@ -283,8 +283,9 @@ function UploadProgressPanel({
   // Counts a file the moment its own PUT to S3 finishes (not just once the
   // whole batch's completion request comes back) so this climbs steadily
   // per-file instead of sitting at 0 until every file lands at once.
-  const landed = uploads.filter((item) => item.status !== "queued" && item.status !== "uploading")
-    .length;
+  const landed = uploads.filter(
+    (item) => item.status !== "queued" && item.status !== "uploading",
+  ).length;
   const isDone = complete === uploads.length;
 
   return (

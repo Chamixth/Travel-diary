@@ -27,7 +27,7 @@ export const getCurrentPricingPlanFn = createServerFn({ method: "GET" }).handler
   },
 );
 
-export const changePricingPlanFn = createServerFn({ method: "PUT" })
+export const changePricingPlanFn = createServerFn({ method: "POST" })
   .validator(z.object({ slug: z.string().trim().min(1) }))
   .handler(async ({ data }): Promise<PricingPlan> => {
     try {

@@ -26,6 +26,7 @@ import { Route as AlbumSlugRouteImport } from './routes/album.$slug'
 import { Route as TripSlugRouteImport } from './routes/trip.$slug'
 import { Route as ApiV1SplatRouteImport } from './routes/api/v1/$'
 import { Route as AuthAuth0CallbackRouteImport } from './routes/auth.auth0.callback'
+import { Route as FixturesExperienceFixtureIdRouteImport } from './routes/fixtures.experience.$fixtureId'
 import { Route as TripSlugImagesRouteImport } from './routes/trip.$slug.images'
 import { Route as TripSlugProcessingRouteImport } from './routes/trip.$slug.processing'
 
@@ -114,6 +115,12 @@ const AuthAuth0CallbackRoute = AuthAuth0CallbackRouteImport.update({
   path: '/auth/auth0/callback',
   getParentRoute: () => rootRouteImport,
 } as any)
+const FixturesExperienceFixtureIdRoute =
+  FixturesExperienceFixtureIdRouteImport.update({
+    id: '/fixtures/experience/$fixtureId',
+    path: '/fixtures/experience/$fixtureId',
+    getParentRoute: () => rootRouteImport,
+  } as any)
 const TripSlugImagesRoute = TripSlugImagesRouteImport.update({
   id: '/images',
   path: '/images',
@@ -143,6 +150,7 @@ export interface FileRoutesByFullPath {
   '/trip/$slug': typeof TripSlugRouteWithChildren
   '/api/v1/$': typeof ApiV1SplatRoute
   '/auth/auth0/callback': typeof AuthAuth0CallbackRoute
+  '/fixtures/experience/$fixtureId': typeof FixturesExperienceFixtureIdRoute
   '/trip/$slug/images': typeof TripSlugImagesRoute
   '/trip/$slug/processing': typeof TripSlugProcessingRoute
 }
@@ -164,6 +172,7 @@ export interface FileRoutesByTo {
   '/trip/$slug': typeof TripSlugRouteWithChildren
   '/api/v1/$': typeof ApiV1SplatRoute
   '/auth/auth0/callback': typeof AuthAuth0CallbackRoute
+  '/fixtures/experience/$fixtureId': typeof FixturesExperienceFixtureIdRoute
   '/trip/$slug/images': typeof TripSlugImagesRoute
   '/trip/$slug/processing': typeof TripSlugProcessingRoute
 }
@@ -186,6 +195,7 @@ export interface FileRoutesById {
   '/trip/$slug': typeof TripSlugRouteWithChildren
   '/api/v1/$': typeof ApiV1SplatRoute
   '/auth/auth0/callback': typeof AuthAuth0CallbackRoute
+  '/fixtures/experience/$fixtureId': typeof FixturesExperienceFixtureIdRoute
   '/trip/$slug/images': typeof TripSlugImagesRoute
   '/trip/$slug/processing': typeof TripSlugProcessingRoute
 }
@@ -209,6 +219,7 @@ export interface FileRouteTypes {
     | '/trip/$slug'
     | '/api/v1/$'
     | '/auth/auth0/callback'
+    | '/fixtures/experience/$fixtureId'
     | '/trip/$slug/images'
     | '/trip/$slug/processing'
   fileRoutesByTo: FileRoutesByTo
@@ -230,6 +241,7 @@ export interface FileRouteTypes {
     | '/trip/$slug'
     | '/api/v1/$'
     | '/auth/auth0/callback'
+    | '/fixtures/experience/$fixtureId'
     | '/trip/$slug/images'
     | '/trip/$slug/processing'
   id:
@@ -251,6 +263,7 @@ export interface FileRouteTypes {
     | '/trip/$slug'
     | '/api/v1/$'
     | '/auth/auth0/callback'
+    | '/fixtures/experience/$fixtureId'
     | '/trip/$slug/images'
     | '/trip/$slug/processing'
   fileRoutesById: FileRoutesById
@@ -273,6 +286,7 @@ export interface RootRouteChildren {
   TripSlugRoute: typeof TripSlugRouteWithChildren
   ApiV1SplatRoute: typeof ApiV1SplatRoute
   AuthAuth0CallbackRoute: typeof AuthAuth0CallbackRoute
+  FixturesExperienceFixtureIdRoute: typeof FixturesExperienceFixtureIdRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -396,6 +410,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthAuth0CallbackRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/fixtures/experience/$fixtureId': {
+      id: '/fixtures/experience/$fixtureId'
+      path: '/fixtures/experience/$fixtureId'
+      fullPath: '/fixtures/experience/$fixtureId'
+      preLoaderRoute: typeof FixturesExperienceFixtureIdRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/trip/$slug/images': {
       id: '/trip/$slug/images'
       path: '/images'
@@ -445,6 +466,7 @@ const rootRouteChildren: RootRouteChildren = {
   TripSlugRoute: TripSlugRouteWithChildren,
   ApiV1SplatRoute: ApiV1SplatRoute,
   AuthAuth0CallbackRoute: AuthAuth0CallbackRoute,
+  FixturesExperienceFixtureIdRoute: FixturesExperienceFixtureIdRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

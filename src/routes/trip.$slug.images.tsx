@@ -70,7 +70,10 @@ function TripImages() {
     setUploading(true);
     setUploadProgress(
       Object.fromEntries(
-        entries.map(({ clientId, file }) => [clientId, { fileName: file.name, loaded: 0, total: file.size }]),
+        entries.map(({ clientId, file }) => [
+          clientId,
+          { fileName: file.name, loaded: 0, total: file.size },
+        ]),
       ),
     );
     try {
@@ -233,10 +236,7 @@ function TripImages() {
                 key={image.id}
                 className="group relative aspect-square overflow-hidden bg-charcoal"
               >
-                <GalleryImage
-                  src={image.thumbnailUrl}
-                  alt={image.fileName || "Trip photograph"}
-                />
+                <GalleryImage src={image.thumbnailUrl} alt={image.fileName || "Trip photograph"} />
                 <button
                   type="button"
                   onClick={() => setImagePendingDelete(image)}

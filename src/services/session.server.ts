@@ -18,11 +18,13 @@ import {
   type SessionPayload,
   type User,
 } from "@/interface/auth";
+import { accessTokenNeedsRefresh, readAccessTokenMetadata } from "@/lib/auth/token-metadata";
 
 import { getAuthEnv } from "./env.server";
 
 const SESSION_NAME = "voyaloom_session";
 const SESSION_MAX_AGE = 60 * 60 * 24 * 30; // 30 days
+const SESSION_MAX_AGE_MS = SESSION_MAX_AGE * 1_000;
 function authSession() {
   const { sessionSecret, isProduction } = getAuthEnv();
   // `useSession` is TanStack Start's server-side request helper, not a React
@@ -43,8 +45,28 @@ function authSession() {
 
 /** Persist a fresh login/registration result in the session cookie. */
 export async function createSession(result: AuthResult): Promise<void> {
+  const now = Date.now();
+  const metadata = readAccessTokenMetadata(result.tokens.accessToken);
+  if (!metadata || accessTokenNeedsRefresh(metadata.expiresAt, now)) {
+    throw new ApiError("The access token is expired or has no usable expiry.", 401, {
+      code: "session_token_expired",
+    });
+  }
+
   const session = await authSession();
-  await session.update({ user: result.user, tokens: result.tokens });
+  const existingCreatedAt = session.data?.sessionCreatedAt;
+  await session.update({
+    user: result.user,
+    tokens: {
+      ...result.tokens,
+      accessTokenIssuedAt: metadata.issuedAt,
+      accessTokenExpiresAt: metadata.expiresAt,
+      accessTokenSyncedAt: now,
+    },
+    sessionCreatedAt:
+      typeof existingCreatedAt === "number" && existingCreatedAt > 0 ? existingCreatedAt : now,
+    sessionExpiresAt: now + SESSION_MAX_AGE_MS,
+  });
 }
 
 /** Destroy the session cookie. */
@@ -60,7 +82,11 @@ export async function getAuthenticatedUser(): Promise<User | null> {
   const session = await authSession();
   const payload = session.data;
 
-  if (!payload?.user || !payload.tokens?.accessToken) {
+  if (
+    !payload?.user ||
+    !payload.tokens?.accessToken ||
+    (typeof payload.sessionExpiresAt === "number" && payload.sessionExpiresAt <= Date.now())
+  ) {
     return null;
   }
 
@@ -78,6 +104,25 @@ export async function requireAccessToken(): Promise<string> {
 
   if (!payload?.tokens?.accessToken) {
     throw new ApiError("Not authenticated.", 401);
+  }
+
+  if (typeof payload.sessionExpiresAt === "number" && payload.sessionExpiresAt <= Date.now()) {
+    throw new ApiError("Your session has expired. Please sign in again.", 401, {
+      code: "session_expired",
+    });
+  }
+
+  // Older sealed sessions did not persist timing metadata. Reading exp from
+  // their JWT gives them a safe migration path without accepting stale tokens.
+  const expiresAt =
+    payload.tokens.accessTokenExpiresAt ??
+    readAccessTokenMetadata(payload.tokens.accessToken)?.expiresAt ??
+    Number.NaN;
+  if (accessTokenNeedsRefresh(expiresAt)) {
+    throw new ApiError("Your access token needs to be refreshed.", 401, {
+      code: "session_token_expired",
+      expiresAt: Number.isFinite(expiresAt) ? expiresAt : null,
+    });
   }
 
   return payload.tokens.accessToken;

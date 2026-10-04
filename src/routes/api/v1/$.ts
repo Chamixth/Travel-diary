@@ -20,7 +20,17 @@ async function proxyRequest({ request, params }: { request: Request; params: { _
     if (accept) headers.set("accept", accept);
 
     if (!isPublicPricing) {
-      headers.set("authorization", `Bearer ${await requireAccessToken()}`);
+      // Browser requests carry the freshest Auth0 token. This matters after
+      // token rotation: the sealed session may still contain the token issued
+      // during callback, while Auth0's client has already refreshed it.
+      // Server-originated calls without a header continue to use the sealed
+      // session. The Go API validates either token against Auth0 on every call.
+      const suppliedAuthorization = request.headers.get("authorization");
+      const authorization =
+        suppliedAuthorization?.startsWith("Bearer ") && suppliedAuthorization.length > 7
+          ? suppliedAuthorization
+          : `Bearer ${await requireAccessToken()}`;
+      headers.set("authorization", authorization);
     }
 
     const hasBody = request.method !== "GET" && request.method !== "HEAD";

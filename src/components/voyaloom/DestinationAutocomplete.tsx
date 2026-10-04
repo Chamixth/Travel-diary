@@ -56,7 +56,7 @@ export function DestinationAutocomplete({ value, onChange }: DestinationAutocomp
         const next = (data.features ?? []).flatMap((feature) => {
           const properties = feature.properties;
           const label = properties?.formatted?.trim() || properties?.address_line1?.trim();
-          if (!label) return [];
+          if (!label || !properties) return [];
           return [
             {
               label,

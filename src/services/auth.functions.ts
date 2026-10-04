@@ -48,7 +48,7 @@ export const auth0SessionFn = createServerFn({ method: "POST" })
   .handler(async ({ data }): Promise<User> => {
     await createSession({
       user: { ...data.user, provider: "google" },
-      tokens: { accessToken: data.accessToken, accessTokenExpiresAt: null },
+      tokens: { accessToken: data.accessToken },
     });
     return { ...data.user, provider: "google" };
   });

@@ -1,6 +1,7 @@
 import { Auth0Provider as Provider, useAuth0 } from "@auth0/auth0-react";
-import { createContext, useContext, useEffect, useState } from "react";
+import { createContext, useCallback, useContext, useEffect, useRef, useState } from "react";
 import { setAccessTokenGetter } from "@/lib/auth/access-token";
+import { auth0SessionFn } from "@/services/auth.functions";
 
 const domain = import.meta.env.VITE_AUTH0_DOMAIN ?? "";
 const clientId = import.meta.env.VITE_AUTH0_CLIENT_ID ?? "";
@@ -12,18 +13,46 @@ const audience = import.meta.env.VITE_AUTH0_AUDIENCE ?? "";
 const AUTH_SCOPE = "openid profile email offline_access";
 
 function Auth0TokenBridge({ children }: { children: React.ReactNode }) {
-  const { getAccessTokenSilently, isAuthenticated, isLoading, logout } = useAuth0();
+  const { getAccessTokenSilently, isAuthenticated, isLoading, logout, user } = useAuth0();
   const [accessToken, setAccessToken] = useState<string | null>(null);
+  const syncedToken = useRef<string | null>(null);
 
-  async function getToken(forceRefresh = false): Promise<string> {
-    const token = await getAccessTokenSilently({
-      cacheMode: forceRefresh ? "off" : "on",
-      authorizationParams: { audience, scope: AUTH_SCOPE },
-    });
-    logTokenMetadata(token, forceRefresh ? "forced-refresh" : "silent");
-    setAccessToken(token);
-    return token;
-  }
+  const getToken = useCallback(
+    async (forceRefresh = false): Promise<string> => {
+      const token = await getAccessTokenSilently({
+        cacheMode: forceRefresh ? "off" : "on",
+        authorizationParams: { audience, scope: AUTH_SCOPE },
+      });
+      logTokenMetadata(token, forceRefresh ? "forced-refresh" : "silent");
+      setAccessToken(token);
+
+      // Keep server functions aligned with Auth0's rotating browser token.
+      // A token is synced only once, so normal API requests do not add a
+      // second server round-trip while the cached token remains current.
+      if (user?.sub && syncedToken.current !== token) {
+        try {
+          await auth0SessionFn({
+            data: {
+              accessToken: token,
+              user: {
+                id: user.sub,
+                username: user.nickname ?? user.email ?? user.sub,
+                email: user.email ?? "",
+                name: user.name ?? user.nickname ?? user.email ?? "",
+                avatarUrl: user.picture ?? null,
+              },
+            },
+          });
+          syncedToken.current = token;
+        } catch (error) {
+          console.warn("[Auth0] could not synchronize the refreshed server session", error);
+        }
+      }
+
+      return token;
+    },
+    [getAccessTokenSilently, user],
+  );
 
   useEffect(() => {
     if (isLoading || isAuthenticated) return;
@@ -47,7 +76,7 @@ function Auth0TokenBridge({ children }: { children: React.ReactNode }) {
     setAccessTokenGetter(getToken);
 
     return () => setAccessTokenGetter(null);
-  }, [getAccessTokenSilently, isAuthenticated, isLoading]);
+  }, [getToken, isAuthenticated, isLoading]);
 
   useEffect(() => {
     if (!isLoading && isAuthenticated) {
@@ -57,7 +86,7 @@ function Auth0TokenBridge({ children }: { children: React.ReactNode }) {
     } else if (!isAuthenticated) {
       setAccessToken(null);
     }
-  }, [isAuthenticated, isLoading, getAccessTokenSilently]);
+  }, [getToken, isAuthenticated, isLoading]);
 
   // A second consecutive 401 from browser-api.ts (fresh token still
   // rejected) means the session is truly gone server-side. Sign out

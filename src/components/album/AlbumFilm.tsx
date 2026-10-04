@@ -55,7 +55,9 @@ export function AlbumFilm({ images, plan }: { images: TripImage[]; plan: AlbumPl
               const photo = byId.get(id);
               return photo && block.caption ? { ...photo, caption: block.caption } : photo;
             })
-            .filter((photo): photo is FilmPhoto => Boolean(photo) && photo.id !== coverPhotoId),
+            .filter(
+              (photo): photo is FilmPhoto => photo !== undefined && photo.id !== coverPhotoId,
+            ),
         }));
         const chapterPhotos = blocks.flatMap(({ photos }) => photos);
         const uniquePhotos = [...new Map(chapterPhotos.map((photo) => [photo.id, photo])).values()];

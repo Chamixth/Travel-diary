@@ -24,14 +24,24 @@ export interface AuthTokens {
   accessToken: string;
   /** Local auth may provide this; Auth0 refresh is managed by the browser SDK. */
   refreshToken?: string;
-  /** Absolute expiry (epoch ms) of the access token, when the backend tells us. */
-  accessTokenExpiresAt: number | null;
+  /** Timing metadata is derived from the JWT and is never used to authenticate it. */
+  accessTokenIssuedAt: number | null;
+  accessTokenExpiresAt: number;
+  accessTokenSyncedAt: number;
+}
+
+/** Token material accepted when creating or refreshing a sealed session. */
+export interface AuthTokenInput {
+  accessToken: string;
+  refreshToken?: string;
 }
 
 /** What we persist inside the sealed session cookie. Server-side only. */
 export interface SessionPayload {
   user: User;
   tokens: AuthTokens;
+  sessionCreatedAt: number;
+  sessionExpiresAt: number;
 }
 
 /* ------------------------------------------------------------------ */
@@ -107,7 +117,7 @@ export interface RawTokens {
 /** Normalised successful auth result. Server-side only. */
 export interface AuthResult {
   user: User;
-  tokens: AuthTokens;
+  tokens: AuthTokenInput;
 }
 
 export interface HealthStatus {

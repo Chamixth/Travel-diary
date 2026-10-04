@@ -1,6 +1,6 @@
 import { useEffect } from "react";
 
-export function AlbumGenerationLoader() {
+export function AlbumGenerationLoader({ stageLabel }: { stageLabel?: string }) {
   useEffect(() => {
     console.info("[VoyaLoom][AlbumGenerationLoader] mounted");
     return () => console.info("[VoyaLoom][AlbumGenerationLoader] unmounted");
@@ -25,7 +25,9 @@ export function AlbumGenerationLoader() {
           ))}
           <div className="album-beacon absolute -right-2 top-2 size-2 rounded-full bg-gold shadow-gold" />
         </div>
-        <p className="text-[10px] uppercase tracking-ultra text-gold">Composing your album</p>
+        <p className="text-[10px] uppercase tracking-ultra text-gold">
+          {stageLabel || "Designing your experience…"}
+        </p>
         <p className="mt-3 font-serif text-xl italic text-sand/60">
           Placing the moments into a story worth returning to.
         </p>

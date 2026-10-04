@@ -9,7 +9,6 @@ interface/auth.ts        types + ApiError (shared)
 services/
   env.server.ts          reads API_URL / SESSION_SECRET (server-only)
   http.server.ts         JSON fetch wrapper → normalises errors to ApiError
-  auth.service.ts        backend calls: register / login / refresh / googleCallback / health
   session.server.ts      sealed (AES-encrypted, httpOnly) cookie holding the token pair
   auth.functions.ts      createServerFn RPC boundary the client calls
 lib/auth/
@@ -25,11 +24,24 @@ routes/auth.auth0.callback.tsx
 
 ## Token handling
 
-The browser never sees the access or refresh token. `login`/`register` store both
-inside an encrypted, signed, `httpOnly`, `SameSite=Lax` cookie
-(`voyaloom_session`). `getAuthenticatedUser()` transparently refreshes the access
-token via `/api/v1/auth/refresh` when it is close to expiry, and clears the
-session if the refresh token is rejected.
+Auth0's SPA SDK holds its rotating refresh token and current access token in
+browser storage. The callback also copies the current access token into an
+encrypted, signed, `httpOnly`, `SameSite=Lax` application session cookie
+(`voyaloom_session`) so TanStack server functions and route guards can operate.
+
+Browser API calls send the freshest Auth0 access token. The same-origin API
+proxy forwards that token when present and falls back to the sealed session for
+server-originated requests. The Go API validates either token against Auth0 on
+every protected call. Application code must never treat the frontend user or
+sealed session as authorization by itself.
+
+The server derives `iat` and `exp` timing metadata from each Auth0 JWT when it
+seals the session. It rejects tokens that are expired or within 30 seconds of
+expiry before starting a backend request. Whenever the Auth0 SDK rotates the
+browser token, `Auth0TokenBridge` synchronizes that token into the sealed
+session once, keeping server functions current without an extra request on
+every API call. JWT metadata is only a freshness hint; the Go API remains the
+authority that verifies the signature, issuer, and audience.
 
 The current user is resolved once per navigation in `routes/__root.tsx`
 `beforeLoad` and placed on route context. Call `router.invalidate()` after any

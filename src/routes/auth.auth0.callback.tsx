@@ -7,7 +7,7 @@ import { auth0SessionFn } from "@/services/auth.functions";
 import { seo } from "@/lib/seo/seo";
 
 export const Route = createFileRoute("/auth/auth0/callback")({
-  head: () => seo({ title: "Signing you in", robots: "noindex, nofollow" }),
+  head: () => seo({ title: "Signing you in", robots: "private" }),
   component: Auth0Callback,
 });
 
@@ -29,8 +29,6 @@ function Auth0Callback() {
     if (auth0Error) {
       started.current = true;
       console.error("[Auth0] redirect callback failed", {
-        error: auth0Error.error,
-        errorDescription: auth0Error.error_description,
         message: auth0Error.message,
       });
       toast.error(auth0Error.message);
@@ -41,6 +39,8 @@ function Auth0Callback() {
     // Auth0 may finish processing the callback one render after isLoading flips.
     if (!isAuthenticated || !user?.sub) return;
     started.current = true;
+    const auth0User = user;
+    const subject = user.sub;
 
     async function complete() {
       try {
@@ -55,11 +55,11 @@ function Auth0Callback() {
           data: {
             accessToken,
             user: {
-              id: user.sub,
-              username: user.nickname ?? user.email ?? user.sub,
-              email: user.email ?? "",
-              name: user.name ?? user.nickname ?? user.email ?? "",
-              avatarUrl: user.picture ?? null,
+              id: subject,
+              username: auth0User.nickname ?? auth0User.email ?? subject,
+              email: auth0User.email ?? "",
+              name: auth0User.name ?? auth0User.nickname ?? auth0User.email ?? "",
+              avatarUrl: auth0User.picture ?? null,
             },
           },
         });

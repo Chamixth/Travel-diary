@@ -6,7 +6,8 @@ import { TripAnalysisProgress } from "@/components/voyaloom/TripAnalysisProgress
 import { AlbumGenerationLoader } from "@/components/album/AlbumGenerationLoader";
 import { requireAuth } from "@/lib/auth/guards";
 import type { TripAnalysisStatus } from "@/interface/trip-analysis";
-import { generateAlbumFn, getAlbumFn } from "@/services/album.functions";
+import { getAlbumFn } from "@/services/album.functions";
+import { generateExperience } from "@/services/generation-polling";
 import {
   getTripAnalysisStatusFn,
   retryFailedTripAnalysisFn,
@@ -31,6 +32,7 @@ function TripProcessing() {
   const [redirecting, setRedirecting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [generating, setGenerating] = useState(false);
+  const [generationStage, setGenerationStage] = useState<string>();
   const [retrying, setRetrying] = useState(false);
   const [retryVersion, setRetryVersion] = useState(0);
   // Guards the auto-generate trigger below so it fires once per mount/retry,
@@ -42,9 +44,7 @@ function TripProcessing() {
     setGenerating(true);
     const startedAt = Date.now();
     try {
-      await generateAlbumFn({ data: { tripId } });
-      const remaining = 1200 - (Date.now() - startedAt);
-      if (remaining > 0) await new Promise((resolve) => setTimeout(resolve, remaining));
+      await generateExperience(tripId, (job) => setGenerationStage(job.stageLabel));
       console.info("[VoyaLoom][Processing] generation succeeded, redirecting", {
         tripId,
         durationMs: Date.now() - startedAt,
@@ -76,7 +76,7 @@ function TripProcessing() {
         }
         setStatus(nextStatus);
         setError(null);
-        console.info("[VoyaLoom][Processing] analysis status", { tripId, ...nextStatus });
+        console.info("[VoyaLoom][Processing] analysis status", nextStatus);
         if (!nextStatus.readyToGenerate) {
           timeout = setTimeout(() => void poll(), 3000);
         } else {
@@ -151,7 +151,7 @@ function TripProcessing() {
             retrying={retrying}
           />
         )}
-        {generating && <AlbumGenerationLoader />}
+        {generating && <AlbumGenerationLoader stageLabel={generationStage} />}
         {((!status && !error) || redirecting) && (
           <div className="flex min-h-[420px] flex-col items-center justify-center gap-4 text-sand/50">
             <Loader2 className="size-5 animate-spin text-gold" />

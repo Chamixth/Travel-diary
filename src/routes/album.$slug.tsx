@@ -2,13 +2,27 @@ import { createFileRoute, Link } from "@tanstack/react-router";
 import { useCallback, useEffect, useState } from "react";
 import { z } from "zod";
 import { AlbumGenerationLoader } from "@/components/album/AlbumGenerationLoader";
-import { toImageMap } from "@/components/album/createAlbumPlan";
 import { LuxuryNavbar } from "@/components/voyaloom/LuxuryNavbar";
 import { requireAuth } from "@/lib/auth/guards";
 import { seo } from "@/lib/seo/seo";
-import { generateAlbumFn, getAlbumFn } from "@/services/album.functions";
+import { getAlbumFn } from "@/services/album.functions";
+import { getExperienceFn } from "@/services/experience.functions";
+import { generateExperience } from "@/services/generation-polling";
 import { listTripImagesFn } from "@/services/trip-image.functions";
 import { AlbumFilm } from "@/components/album/AlbumFilm";
+import { ExperienceRuntime } from "@/features/album-experience/runtime/ExperienceRuntime";
+import { validateRuntimeReferences } from "@/features/album-experience/runtime/validation";
+import {
+  experienceVersionSchema,
+  type ExperienceMediaAsset,
+  type ExperienceSpec,
+} from "@/features/album-experience/schemas/experience-spec";
+
+interface LoadedAlbum {
+  plan: import("@/interface/album").AlbumPlan;
+  sourceImages: import("@/interface/trip-image").TripImage[];
+  experience?: ExperienceSpec;
+}
 
 export const Route = createFileRoute("/album/$slug")({
   beforeLoad: ({ context, location }) => requireAuth(context, location.pathname),
@@ -26,14 +40,11 @@ function Album() {
   const { slug: tripId } = Route.useParams();
   const { regenerate } = Route.useSearch();
   const shouldRegenerate = regenerate === "1";
-  const [album, setAlbum] = useState<{
-    plan: import("@/interface/album").AlbumPlan;
-    images: Record<string, string>;
-    sourceImages: import("@/interface/trip-image").TripImage[];
-  } | null>(null);
+  const [album, setAlbum] = useState<LoadedAlbum | null>(null);
   const [error, setError] = useState(false);
   const [generating, setGenerating] = useState(false);
   const [generationError, setGenerationError] = useState<string | null>(null);
+  const [generationStage, setGenerationStage] = useState<string>();
 
   const handleGenerate = useCallback(async () => {
     console.info("[VoyaLoom][Album] generate clicked", { tripId });
@@ -42,19 +53,16 @@ function Album() {
     const startedAt = Date.now();
 
     try {
-      const [plan, images] = await Promise.all([
-        generateAlbumFn({ data: { tripId } }),
-        listTripImagesFn({ data: { tripId } }),
-      ]);
-      const remaining = 1400 - (Date.now() - startedAt);
-      if (remaining > 0) await new Promise((resolve) => setTimeout(resolve, remaining));
+      await generateExperience(tripId, (job) => setGenerationStage(job.stageLabel));
+      const loaded = await loadAlbum(tripId);
       console.info("[VoyaLoom][Album] generation succeeded", {
         tripId,
-        chapters: plan.chapters.length,
-        imageCount: images.length,
+        chapters: loaded.plan.chapters.length,
+        imageCount: loaded.sourceImages.length,
+        experienceVersion: loaded.experience?.generatorVersion,
         durationMs: Date.now() - startedAt,
       });
-      setAlbum({ plan, images: toImageMap(images), sourceImages: images });
+      setAlbum(loaded);
       setError(false);
     } catch (reason) {
       console.error("[VoyaLoom][Album] generation failed", { tripId, reason });
@@ -78,19 +86,16 @@ function Album() {
     }
 
     console.info("[VoyaLoom][Album] loading album", { tripId });
-    Promise.all([getAlbumFn({ data: { tripId } }), listTripImagesFn({ data: { tripId } })])
-      .then(([plan, images]) => {
+    loadAlbum(tripId)
+      .then((loaded) => {
         if (cancelled) return;
         console.info("[VoyaLoom][Album] loaded album", {
           tripId,
-          chapters: plan.chapters.length,
-          imageCount: images.length,
+          chapters: loaded.plan.chapters.length,
+          imageCount: loaded.sourceImages.length,
+          experienceVersion: loaded.experience?.generatorVersion,
         });
-        setAlbum({
-          plan,
-          images: toImageMap(images),
-          sourceImages: images,
-        });
+        setAlbum(loaded);
       })
       .catch((reason) => {
         console.error("[VoyaLoom][Album] failed to load album", { tripId, reason });
@@ -105,7 +110,7 @@ function Album() {
   if (error) {
     return (
       <AlbumShell>
-        {generating && <AlbumGenerationLoader />}
+        {generating && <AlbumGenerationLoader stageLabel={generationStage} />}
         <main className="mx-auto max-w-xl px-6 pb-32 pt-48 text-center">
           <p className="text-[10px] uppercase tracking-ultra text-gold">Your album is waiting</p>
           <h1 className="mt-5 font-serif text-4xl">Compose this journey.</h1>
@@ -137,7 +142,7 @@ function Album() {
   if (!album) {
     return (
       <AlbumShell>
-        {generating && <AlbumGenerationLoader />}
+        {generating && <AlbumGenerationLoader stageLabel={generationStage} />}
         <main className="flex min-h-[70vh] items-center justify-center px-6 pt-32">
           {generationError ? (
             <div className="text-center">
@@ -159,7 +164,7 @@ function Album() {
 
   return (
     <AlbumShell>
-      {generating && <AlbumGenerationLoader />}
+      {generating && <AlbumGenerationLoader stageLabel={generationStage} />}
       {generationError && (
         <p className="relative z-10 mx-auto mt-4 max-w-xl px-6 text-center text-sm text-red-300">
           {generationError}
@@ -175,9 +180,57 @@ function Album() {
       >
         Regenerate album
       </button>
-      <AlbumFilm images={album.sourceImages} plan={album.plan} />
+      {album.experience ? (
+        <ExperienceRuntime
+          spec={album.experience}
+          assets={toExperienceAssets(album.sourceImages)}
+        />
+      ) : (
+        <AlbumFilm images={album.sourceImages} plan={album.plan} />
+      )}
     </AlbumShell>
   );
+}
+
+async function loadAlbum(tripId: string): Promise<LoadedAlbum> {
+  const [plan, images, experienceResult] = await Promise.all([
+    getAlbumFn({ data: { tripId } }),
+    listTripImagesFn({ data: { tripId } }),
+    getExperienceFn({ data: { tripId } }).catch(() => null),
+  ]);
+  const parsed = experienceVersionSchema.safeParse(parseExperienceResponse(experienceResult));
+  const experience = parsed.success ? parsed.data.spec : undefined;
+  const hasRuntimeError = experience
+    ? validateRuntimeReferences(experience, new Set(images.map((image) => image.id))).some(
+        (diagnostic) => diagnostic.severity === "error",
+      )
+    : false;
+  return {
+    plan,
+    sourceImages: images,
+    experience: hasRuntimeError ? undefined : experience,
+  };
+}
+
+function parseExperienceResponse(response: string | null): unknown {
+  if (!response) return null;
+  try {
+    return JSON.parse(response);
+  } catch {
+    return null;
+  }
+}
+
+function toExperienceAssets(
+  images: import("@/interface/trip-image").TripImage[],
+): ExperienceMediaAsset[] {
+  return images.map((image) => ({
+    id: image.id,
+    src: image.s3Url,
+    thumbnailSrc: image.thumbnailUrl,
+    width: Math.max(1, image.width),
+    height: Math.max(1, image.height),
+  }));
 }
 
 function AlbumShell({ children }: { children: React.ReactNode }) {
